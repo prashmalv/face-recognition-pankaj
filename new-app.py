@@ -21,8 +21,13 @@ def load_known_faces(directory='known_faces'):
     for filename in os.listdir(directory):
         if filename.endswith(('jpg', 'jpeg', 'png')):
             image_path = os.path.join(directory, filename)
+            st.write(f"Loading known face: {image_path}")
             image = face_recognition.load_image_file(image_path)
-            encoding = face_recognition.face_encodings(image)
+            face_locations = face_recognition.face_locations(image, model='hog')
+            st.write(f"Detected {len(face_locations)} face(s) in known image")
+            if len(face_locations) == 0:
+                st.warning(f"⚠️ No face detected in known image: {filename}")
+            encoding = face_recognition.face_encodings(image, face_locations)
             if encoding:
                 known_encodings.append(encoding[0])
                 known_names.append(os.path.splitext(filename)[0])
@@ -73,7 +78,8 @@ known_encodings, known_names = load_known_faces()
 if known_encodings and crowd_file:
     if crowd_file.type.startswith("image"):
         image = face_recognition.load_image_file(crowd_file)
-        face_locations = face_recognition.face_locations(image)
+        face_locations = face_recognition.face_locations(image, model='hog')
+        st.write(f"Detected {len(face_locations)} face(s) in uploaded image")
         face_encodings = face_recognition.face_encodings(image, face_locations)
 
         pil_img = Image.fromarray(image)
@@ -103,7 +109,10 @@ if known_encodings and crowd_file:
         if found:
             st.success("✅ Person Found in Image!")
         else:
-            st.warning("❌ No match found in image.")
+            if face_locations:
+                st.warning("👤 Faces detected, but no match found.")
+            else:
+                st.warning("🚫 No faces detected in image.")
 
     elif crowd_file.type == "video/mp4":
         tfile = tempfile.NamedTemporaryFile(delete=False)
@@ -119,7 +128,7 @@ if known_encodings and crowd_file:
                 break
 
             rgb_frame = frame[:, :, ::-1]
-            face_locations = face_recognition.face_locations(rgb_frame)
+            face_locations = face_recognition.face_locations(rgb_frame, model='hog')
             face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
 
             for face_encoding, face_location in zip(face_encodings, face_locations):
@@ -151,6 +160,6 @@ if known_encodings and crowd_file:
         else:
             st.warning("❌ No match found in video.")
 
-# Show the recognition log
+# Show recognition log
 if st.button("Show Recognition Log"):
     display_log()
