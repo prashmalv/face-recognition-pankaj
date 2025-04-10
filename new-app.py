@@ -12,26 +12,7 @@ import datetime
 # --- Setup ---
 st.set_page_config(page_title="Missing Person Recognition", layout="wide")
 st.title("🌟 Missing Person Face Recognition System")
-st.write("Upload known images and a crowd image or video to find missing persons.")
-
-# --- Load known faces ---
-def load_known_faces(directory='known_faces'):
-    known_encodings = []
-    known_names = []
-    for filename in os.listdir(directory):
-        if filename.endswith(('jpg', 'jpeg', 'png')):
-            image_path = os.path.join(directory, filename)
-            st.write(f"Loading known face: {image_path}")
-            image = face_recognition.load_image_file(image_path)
-            face_locations = face_recognition.face_locations(image, model='hog')
-            st.write(f"Detected {len(face_locations)} face(s) in known image")
-            if len(face_locations) == 0:
-                st.warning(f"⚠️ No face detected in known image: {filename}")
-            encoding = face_recognition.face_encodings(image, face_locations)
-            if encoding:
-                known_encodings.append(encoding[0])
-                known_names.append(os.path.splitext(filename)[0])
-    return known_encodings, known_names
+st.write("Step 1: Upload the missing person's image")
 
 # --- Logging to SQLite ---
 def init_db():
@@ -65,17 +46,30 @@ def display_log():
 # Initialize DB
 init_db()
 
-# Upload crowd image or video
+# Step 1: Upload missing person image
+missing_person_image = st.file_uploader("Upload Missing Person's Photo", type=["jpg", "jpeg", "png"])
+
+# Step 2: Upload group image or video
+st.write("\nStep 2: Upload a group image or video to search")
 crowd_file = st.file_uploader("Upload a crowd image or video", type=["jpg", "jpeg", "png", "mp4"])
 
-# Load known faces from folder
-if not os.path.exists("known_faces"):
-    os.makedirs("known_faces")
-st.info("Place known images in the 'known_faces' folder (with names as filenames)")
+known_encoding = None
+missing_person_name = "MissingPerson"
 
-known_encodings, known_names = load_known_faces()
+if missing_person_image:
+    person_img = face_recognition.load_image_file(missing_person_image)
+    face_locations = face_recognition.face_locations(person_img, model='hog')
+    if face_locations:
+        encodings = face_recognition.face_encodings(person_img, face_locations)
+        if encodings:
+            known_encoding = encodings[0]
+            st.image(missing_person_image, caption="Uploaded Missing Person", use_container_width=True)
+        else:
+            st.error("No face encoding found in the uploaded image.")
+    else:
+        st.error("No face detected in the uploaded image.")
 
-if known_encodings and crowd_file:
+if known_encoding is not None and crowd_file:
     if crowd_file.type.startswith("image"):
         image = face_recognition.load_image_file(crowd_file)
         face_locations = face_recognition.face_locations(image, model='hog')
@@ -87,18 +81,14 @@ if known_encodings and crowd_file:
         found = False
 
         for i, (face_encoding, face_location) in enumerate(zip(face_encodings, face_locations)):
-            distances = face_recognition.face_distance(known_encodings, face_encoding)
-            best_match_index = np.argmin(distances)
-            confidence = 1 - distances[best_match_index]
+            distance = face_recognition.face_distance([known_encoding], face_encoding)[0]
+            confidence = 1 - distance
 
-            st.write("🔍 Distances from known faces:", distances)
-            for idx, dist in enumerate(distances):
-                conf = 1 - dist
-                st.write(f"Compared with {known_names[idx]}: Confidence = {conf:.2f}")
+            st.write(f"Confidence with uploaded person: {confidence:.2f}")
 
             name = "Unknown"
             if confidence > 0.4:
-                name = known_names[best_match_index]
+                name = missing_person_name
                 found = True
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 match_img_path = f"match_{name}_{timestamp}.jpg"
@@ -138,13 +128,12 @@ if known_encodings and crowd_file:
             face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
 
             for face_encoding, face_location in zip(face_encodings, face_locations):
-                distances = face_recognition.face_distance(known_encodings, face_encoding)
-                best_match_index = np.argmin(distances)
-                confidence = 1 - distances[best_match_index]
+                distance = face_recognition.face_distance([known_encoding], face_encoding)[0]
+                confidence = 1 - distance
 
                 name = "Unknown"
                 if confidence > 0.4:
-                    name = known_names[best_match_index]
+                    name = missing_person_name
                     found_in_video = True
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                     match_img_path = f"match_{name}_{timestamp}.jpg"
