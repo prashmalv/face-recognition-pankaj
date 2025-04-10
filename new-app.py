@@ -60,7 +60,7 @@ def display_log():
     conn.close()
     st.write(df)
     for _, row in df.iterrows():
-        st.image(row['image_path'], caption=f"{row['name']} ({row['confidence']*100:.2f}%)", use_column_width=True)
+        st.image(row['image_path'], caption=f"{row['name']} ({row['confidence']*100:.2f}%)", use_container_width=True)
 
 # Initialize DB
 init_db()
@@ -91,8 +91,13 @@ if known_encodings and crowd_file:
             best_match_index = np.argmin(distances)
             confidence = 1 - distances[best_match_index]
 
+            st.write("🔍 Distances from known faces:", distances)
+            for idx, dist in enumerate(distances):
+                conf = 1 - dist
+                st.write(f"Compared with {known_names[idx]}: Confidence = {conf:.2f}")
+
             name = "Unknown"
-            if confidence > 0.6:
+            if confidence > 0.4:
                 name = known_names[best_match_index]
                 found = True
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -102,10 +107,11 @@ if known_encodings and crowd_file:
                 log_recognition(name, confidence, match_img_path)
 
             top, right, bottom, left = face_location
+            label = f"{name} ({confidence*100:.1f}%)" if name != "Unknown" else f"No Match ({confidence*100:.1f}%)"
             draw.rectangle([left, top, right, bottom], outline="green", width=3)
-            draw.text((left, top - 10), f"{name} ({confidence*100:.1f}%)", fill=(255, 0, 0))
+            draw.text((left, top - 10), label, fill=(255, 0, 0))
 
-        st.image(pil_img, caption="Processed Image", use_column_width=True)
+        st.image(pil_img, caption="Processed Image", use_container_width=True)
         if found:
             st.success("✅ Person Found in Image!")
         else:
@@ -137,7 +143,7 @@ if known_encodings and crowd_file:
                 confidence = 1 - distances[best_match_index]
 
                 name = "Unknown"
-                if confidence > 0.6:
+                if confidence > 0.4:
                     name = known_names[best_match_index]
                     found_in_video = True
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -147,10 +153,11 @@ if known_encodings and crowd_file:
                     log_recognition(name, confidence, match_img_path)
 
                 top, right, bottom, left = face_location
+                label = f"{name} ({confidence*100:.1f}%)" if name != "Unknown" else f"No Match ({confidence*100:.1f}%)"
                 cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-                cv2.putText(frame, f"{name} ({confidence*100:.1f}%)", (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
+                cv2.putText(frame, label, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
 
-            stframe.image(frame, channels="BGR", use_column_width=True)
+            stframe.image(frame, channels="BGR", use_container_width=True)
 
         video.release()
         os.unlink(tfile.name)
