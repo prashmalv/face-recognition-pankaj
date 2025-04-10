@@ -1,0 +1,141 @@
+import streamlit as st
+import face_recognition
+import cv2
+import numpy as np
+from PIL import Image, ImageDraw
+import os
+import tempfile
+import sqlite3
+import pandas as pd
+
+# --- Setup ---
+st.set_page_config(page_title="Missing Person Recognition", layout="wide")
+st.title("🌟 Missing Person Face Recognition System")
+st.write("Upload known images and a crowd image or video to find missing persons.")
+
+# --- Load known faces ---
+def load_known_faces(directory='known_faces'):
+    known_encodings = []
+    known_names = []
+    for filename in os.listdir(directory):
+        if filename.endswith(('jpg', 'jpeg', 'png')):
+            image_path = os.path.join(directory, filename)
+            image = face_recognition.load_image_file(image_path)
+            encoding = face_recognition.face_encodings(image)
+            if encoding:
+                known_encodings.append(encoding[0])
+                known_names.append(os.path.splitext(filename)[0])
+    return known_encodings, known_names
+
+# --- Logging to SQLite ---
+def init_db():
+    conn = sqlite3.connect('recognized_faces.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS recognitions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )''')
+    conn.commit()
+    conn.close()
+
+def log_recognition(name):
+    conn = sqlite3.connect('recognized_faces.db')
+    c = conn.cursor()
+    c.execute('INSERT INTO recognitions (name) VALUES (?)', (name,))
+    conn.commit()
+    conn.close()
+
+def display_log():
+    conn = sqlite3.connect('recognized_faces.db')
+    df = pd.read_sql_query('SELECT * FROM recognitions ORDER BY timestamp DESC', conn)
+    conn.close()
+    st.write(df)
+
+# Initialize DB
+init_db()
+
+# Upload crowd image or video
+crowd_file = st.file_uploader("Upload a crowd image or video", type=["jpg", "jpeg", "png", "mp4"])
+
+# Load known faces from folder
+if not os.path.exists("known_faces"):
+    os.makedirs("known_faces")
+st.info("Place known images in the 'known_faces' folder (with names as filenames)")
+
+known_encodings, known_names = load_known_faces()
+
+if known_encodings and crowd_file:
+    if crowd_file.type.startswith("image"):
+        image = face_recognition.load_image_file(crowd_file)
+        face_locations = face_recognition.face_locations(image)
+        face_encodings = face_recognition.face_encodings(image, face_locations)
+
+        pil_img = Image.fromarray(image)
+        draw = ImageDraw.Draw(pil_img)
+        found = False
+
+        for face_encoding, face_location in zip(face_encodings, face_locations):
+            matches = face_recognition.compare_faces(known_encodings, face_encoding)
+            name = "Unknown"
+
+            if True in matches:
+                index = matches.index(True)
+                name = known_names[index]
+                log_recognition(name)
+                found = True
+
+            top, right, bottom, left = face_location
+            draw.rectangle([left, top, right, bottom], outline="green", width=3)
+            draw.text((left, top - 10), name, fill=(255, 0, 0))
+
+        st.image(pil_img, caption="Processed Image", use_column_width=True)
+        if found:
+            st.success("✅ Person Found in Image!")
+        else:
+            st.warning("❌ No match found in image.")
+
+    elif crowd_file.type == "video/mp4":
+        tfile = tempfile.NamedTemporaryFile(delete=False)
+        tfile.write(crowd_file.read())
+
+        video = cv2.VideoCapture(tfile.name)
+        stframe = st.empty()
+        found_in_video = False
+
+        while video.isOpened():
+            ret, frame = video.read()
+            if not ret:
+                break
+
+            rgb_frame = frame[:, :, ::-1]
+            face_locations = face_recognition.face_locations(rgb_frame)
+            face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+
+            for face_encoding, face_location in zip(face_encodings, face_locations):
+                matches = face_recognition.compare_faces(known_encodings, face_encoding)
+                name = "Unknown"
+
+                if True in matches:
+                    index = matches.index(True)
+                    name = known_names[index]
+                    log_recognition(name)
+                    found_in_video = True
+
+                top, right, bottom, left = face_location
+                cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+                cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
+
+            stframe.image(frame, channels="BGR", use_column_width=True)
+
+        video.release()
+        os.unlink(tfile.name)
+
+        if found_in_video:
+            st.success("✅ Person Found in Video!")
+        else:
+            st.warning("❌ No match found in video.")
+
+# Show recognition log
+if st.button("Show Recognition Log"):
+    display_log()
