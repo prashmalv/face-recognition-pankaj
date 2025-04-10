@@ -1,4 +1,4 @@
-# face-recognition-pankaj
+# face-recognition-pankaj ( running main file is new-app.py)
 #folder Structure
 face-recognition-app/
 ├── app.py
