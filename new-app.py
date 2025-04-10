@@ -7,6 +7,7 @@ import os
 import tempfile
 import sqlite3
 import pandas as pd
+import datetime
 
 # --- Setup ---
 st.set_page_config(page_title="Missing Person Recognition", layout="wide")
@@ -34,15 +35,17 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS recognitions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT,
+                    confidence REAL,
+                    image_path TEXT,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 )''')
     conn.commit()
     conn.close()
 
-def log_recognition(name):
+def log_recognition(name, confidence, image_path):
     conn = sqlite3.connect('recognized_faces.db')
     c = conn.cursor()
-    c.execute('INSERT INTO recognitions (name) VALUES (?)', (name,))
+    c.execute('INSERT INTO recognitions (name, confidence, image_path) VALUES (?, ?, ?)', (name, confidence, image_path))
     conn.commit()
     conn.close()
 
@@ -51,6 +54,8 @@ def display_log():
     df = pd.read_sql_query('SELECT * FROM recognitions ORDER BY timestamp DESC', conn)
     conn.close()
     st.write(df)
+    for _, row in df.iterrows():
+        st.image(row['image_path'], caption=f"{row['name']} ({row['confidence']*100:.2f}%)", use_column_width=True)
 
 # Initialize DB
 init_db()
@@ -75,19 +80,24 @@ if known_encodings and crowd_file:
         draw = ImageDraw.Draw(pil_img)
         found = False
 
-        for face_encoding, face_location in zip(face_encodings, face_locations):
-            matches = face_recognition.compare_faces(known_encodings, face_encoding)
-            name = "Unknown"
+        for i, (face_encoding, face_location) in enumerate(zip(face_encodings, face_locations)):
+            distances = face_recognition.face_distance(known_encodings, face_encoding)
+            best_match_index = np.argmin(distances)
+            confidence = 1 - distances[best_match_index]
 
-            if True in matches:
-                index = matches.index(True)
-                name = known_names[index]
-                log_recognition(name)
+            name = "Unknown"
+            if confidence > 0.6:
+                name = known_names[best_match_index]
                 found = True
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                match_img_path = f"match_{name}_{timestamp}.jpg"
+                match_img_crop = image[face_location[0]:face_location[2], face_location[3]:face_location[1]]
+                cv2.imwrite(match_img_path, cv2.cvtColor(match_img_crop, cv2.COLOR_RGB2BGR))
+                log_recognition(name, confidence, match_img_path)
 
             top, right, bottom, left = face_location
             draw.rectangle([left, top, right, bottom], outline="green", width=3)
-            draw.text((left, top - 10), name, fill=(255, 0, 0))
+            draw.text((left, top - 10), f"{name} ({confidence*100:.1f}%)", fill=(255, 0, 0))
 
         st.image(pil_img, caption="Processed Image", use_column_width=True)
         if found:
@@ -113,18 +123,23 @@ if known_encodings and crowd_file:
             face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
 
             for face_encoding, face_location in zip(face_encodings, face_locations):
-                matches = face_recognition.compare_faces(known_encodings, face_encoding)
-                name = "Unknown"
+                distances = face_recognition.face_distance(known_encodings, face_encoding)
+                best_match_index = np.argmin(distances)
+                confidence = 1 - distances[best_match_index]
 
-                if True in matches:
-                    index = matches.index(True)
-                    name = known_names[index]
-                    log_recognition(name)
+                name = "Unknown"
+                if confidence > 0.6:
+                    name = known_names[best_match_index]
                     found_in_video = True
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    match_img_path = f"match_{name}_{timestamp}.jpg"
+                    match_img_crop = rgb_frame[face_location[0]:face_location[2], face_location[3]:face_location[1]]
+                    cv2.imwrite(match_img_path, cv2.cvtColor(match_img_crop, cv2.COLOR_RGB2BGR))
+                    log_recognition(name, confidence, match_img_path)
 
                 top, right, bottom, left = face_location
                 cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-                cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
+                cv2.putText(frame, f"{name} ({confidence*100:.1f}%)", (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
 
             stframe.image(frame, channels="BGR", use_column_width=True)
 
@@ -136,6 +151,6 @@ if known_encodings and crowd_file:
         else:
             st.warning("❌ No match found in video.")
 
-# Show recognition log
+# Show the recognition log
 if st.button("Show Recognition Log"):
     display_log()
